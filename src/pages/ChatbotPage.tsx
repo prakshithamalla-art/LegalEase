@@ -13,6 +13,7 @@ const DEFAULT_GREETING: ChatMessage = {
 };
 
 const MAX_CONTEXT_MESSAGES = 10;
+const MAX_INPUT_CHARS = 2000; // NEW: Character limit constant
 
 function buildConversationHistory(msgs: ChatMessage[]) {
   return msgs
@@ -26,28 +27,27 @@ export function ChatbotPage() {
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [sessions, setSessions] = useState<ChatSessionMetadata[]>([]);
   const [input, setInput] = useState('');
+
   const [isTyping, setIsTyping] = useState(false);
   const [uploadedDoc, setUploadedDoc] = useState<{ name: string; text: string } | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [showSessions, setShowSessions] = useState(false);
   
-  // State to track which message ID was copied to show the checkmark temporarily
   const [copiedId, setCopiedId] = useState<string | null>(null);
   
   const { showToast } = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Clipboard handler
   const handleCopy = (text: string, id: string) => {
     navigator.clipboard.writeText(text);
     setCopiedId(id);
-    showToast('Copied to clipboard!', 'success');
-    setTimeout(() => setCopiedId(null), 2000); // Revert back to copy icon after 2 seconds
+    setTimeout(() => setCopiedId(null), 2000);
   };
 
   useEffect(() => {
     ChatStorageService.migrateOldChatHistory();
+
     const savedId = ChatStorageService.getActiveSessionId();
     const allSessions = ChatStorageService.getSessions();
     setSessions(allSessions);
@@ -68,11 +68,11 @@ export function ChatbotPage() {
     setMessages([DEFAULT_GREETING]);
   }, []);
 
-  const persistSession = useCallback((msgs: ChatMessage[], docCtx: typeof uploadedDoc, sessionId: string | null) => {
+  const persistSession = useCallback((msgs: ChatMessage[], docCtx: { name: string; text: string } | null, sessionId: string | null) => {
     if (!sessionId) return;
     const firstUser = msgs.find(m => m.sender === 'user');
     const title = firstUser
-      ? firstUser.text.substring(0, 50) + (firstUser.text.length > 50 ? '...' : '')
+      ? firstUser.text.substring(0, 50) + (firstUser.text.length > 50 ? '...')
       : 'New Conversation';
     ChatStorageService.saveSession({
       id: sessionId,
@@ -296,26 +296,23 @@ export function ChatbotPage() {
                   {isUser ? <User size={16} /> : <Bot size={16} />}
                 </div>
 
-                {/* Message Bubble Card */}
                 <div className={`p-4 rounded-2xl shadow-sm text-left leading-relaxed relative group ${
                   isUser 
                     ? 'bg-primary text-white rounded-tr-none' 
                     : 'bg-white/80 dark:bg-gray-900/60 backdrop-blur-md text-gray-900 dark:text-gray-150 rounded-tl-none border border-gray-150 dark:border-gray-800'
                 }`}>
                   
-                  {/* Dedicated Copy Button for AI/Bot responses */}
                   {!isUser && (
                     <button 
                       onClick={() => handleCopy(msg.text, msg.id)}
-                      className="absolute top-2 right-2 p-1 text-gray-400 hover:text-primary dark:hover:text-primary-400 transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100"
+                      className="absolute top-2 right-2 p-1 text-gray-400 hover:text-primary transition-colors opacity-0 group-hover:opacity-100"
                       title="Copy to clipboard"
-                      aria-label="Copy response text"
                     >
-                      {copiedId === msg.id ? <Check size={14} className="text-green-500" /> : <Copy size={14} />}
+                      {copiedId === msg.id ? <Check size={14} /> : <Copy size={14} />}
                     </button>
                   )}
 
-                  <p className="text-sm font-medium whitespace-pre-wrap pr-4">{msg.text}</p>
+                  <p className="text-sm font-medium whitespace-pre-wrap">{msg.text}</p>
                   <p className={`text-[9px] font-semibold mt-2 ${isUser ? 'text-blue-100 text-right' : 'text-gray-400 dark:text-gray-500'}`}>
                     {msg.time}
                   </p>
@@ -415,7 +412,6 @@ export function ChatbotPage() {
           </button>
 
           <div className="flex-1 relative">
-            {/* Dynamic Context Badge Indicator */}
             {uploadedDoc && (
               <span 
                 className="absolute right-3 top-2.5 bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300 text-[10px] font-semibold px-2 py-0.5 rounded-full flex items-center gap-1.5 border border-green-200 dark:border-green-800/50 animate-pulse z-10"
@@ -426,19 +422,32 @@ export function ChatbotPage() {
               </span>
             )}
 
-            {/* Accessible Multi-line Text Area for Enter / Shift+Enter management */}
+            {/* NEW: Input with Character Limit */}
             <textarea
-              className="w-full pl-4 pr-36 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400 resize-none max-h-32 min-h-[40px] block align-bottom leading-normal"
+              className="w-full pl-4 pr-16 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400 resize-none max-h-32 min-h-[40px] block align-bottom leading-normal"
               placeholder={uploadedDoc ? "Ask about this document..." : "Ask a legal question..."}
               rows={1}
+              maxLength={MAX_INPUT_CHARS}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && !isTyping && handleSend()}
             />
+            
+            {/* NEW: Dynamic Character Counter */}
+            <div 
+              className={`absolute bottom-2 right-3 text-[10px] font-medium transition-colors duration-300 pointer-events-none ${
+                input.length >= MAX_INPUT_CHARS ? 'text-red-500 animate-pulse' :
+                input.length >= MAX_INPUT_CHARS * 0.9 ? 'text-orange-500' :
+                'text-gray-400 dark:text-gray-500'
+              }`}
+            >
+              {input.length} / {MAX_INPUT_CHARS}
+            </div>
           </div>
+          
           <button
             onClick={handleSend}
-            disabled={!input.trim() || isTyping}
+            disabled={!input.trim() || isTyping || input.length > MAX_INPUT_CHARS}
             className="bg-primary text-white p-2 rounded-lg hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             <Send size={20} />
